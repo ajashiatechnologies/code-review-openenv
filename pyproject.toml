@@ -20,4 +20,4 @@ requires-python = ">=3.9"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["env*"]
+include = ["env*", "tasks*", "tests*"]

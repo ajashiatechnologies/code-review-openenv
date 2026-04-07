@@ -79,7 +79,12 @@ async def reset(task: str = Query(default="easy")):
 async def step(action: Action, session_id: str = Query(...)):
 
     session = _get_session(session_id)
+
     reward, info = grade_action(action, session)
+
+    # 🔥 SAFETY: Ensure strict (0,1) even if something slips
+    EPS = 1e-6
+    reward = max(EPS, min(1 - EPS, reward))
 
     session["step"] += 1
     session["total_reward"] += reward
@@ -97,12 +102,12 @@ async def step(action: Action, session_id: str = Query(...)):
 
     return StepResult(
         observation=_build_observation(session),
-        reward=round(reward, 4),
+        reward=reward,  # ✅ NO ROUNDING
         done=done,
         info={
             **info,
             "step": session["step"],
-            "total_reward": round(session["total_reward"], 4),
+            "total_reward": session["total_reward"],  # ✅ NO ROUNDING
             "episode_id": session["session_id"],
         }
     )
@@ -115,18 +120,18 @@ async def state(session_id: str = Query(...)):
     return _build_observation(session)
 
 
-# ── FIXED: GET /health ─────────────────────────────────
+# ── GET /health ─────────────────────────────────────────
 @app.get("/health")
 async def health():
     return {
-        "status": "healthy",  # 🔥 FIXED
+        "status": "healthy",
         "environment": "code-review-openenv",
         "version": "1.0.0",
         "active_sessions": len(_sessions),
     }
 
 
-# ── NEW: GET /metadata ─────────────────────────────────
+# ── GET /metadata ───────────────────────────────────────
 @app.get("/metadata")
 async def metadata():
     return {
@@ -135,7 +140,7 @@ async def metadata():
     }
 
 
-# ── NEW: GET /schema ───────────────────────────────────
+# ── GET /schema ─────────────────────────────────────────
 @app.get("/schema")
 async def schema():
     return {
@@ -159,7 +164,7 @@ async def schema():
     }
 
 
-# ── NEW: POST /mcp ─────────────────────────────────────
+# ── POST /mcp ───────────────────────────────────────────
 @app.post("/mcp")
 async def mcp():
     return {
@@ -169,6 +174,6 @@ async def mcp():
     }
 
 
-# ── RUN ───────────────────────────────────────────────
+# ── RUN ─────────────────────────────────────────────────
 if __name__ == "__main__":
     uvicorn.run("env.environment:app", host="0.0.0.0", port=7860)

@@ -1,0 +1,17 @@
+[project]
+name = "code-review-openenv"
+version = "0.1.0"
+description = "AI agent environment for automated code review evaluation"
+authors = [
+    {name = "Ajashia Techno Wizards"}
+]
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "httpx",
+    "openai"
+]
+
+[tool.setuptools]
+packages = ["env"]

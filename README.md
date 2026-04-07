@@ -1,12 +1,3 @@
----
-title: Code Review OpenEnv Ajashia Techno Wizards
-emoji: 🤖
-colorFrom: blue
-colorTo: green
-sdk: docker
-pinned: false
----
-
 # 🔍 Code Review OpenEnv
 
 **A real-world AI agent evaluation environment for automated code review tasks.**

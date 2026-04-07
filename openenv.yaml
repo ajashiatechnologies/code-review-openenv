@@ -1,0 +1,83 @@
+name: code-review-openenv
+
+description: >
+  A real-world AI agent environment for automated code review evaluation.
+  An AI agent receives code diffs across multiple languages and contexts,
+  and must detect issue types (bug, security, performance, style),
+  classify severity considering module criticality, and write professional
+  review comments with concrete fix suggestions.
+  Supports multi-issue detection, multi-file context, and context-aware
+  severity scoring — mimicking real-world pull-request review workflows.
+
+version: "1.0.0"
+author: Ajashia Techno Wizards
+
+
+observation_space:
+  type: dict
+  description: A code diff with metadata for the agent to review
+  fields:
+    session_id:       {type: string,  description: Unique session identifier from /reset}
+    diff:             {type: string,  description: The code diff to review (unified diff format)}
+    language:         {type: string,  description: Programming language of the diff}
+    file_name:        {type: string,  description: Source file name}
+    context:          {type: string,  description: Module context (e.g. authentication module)}
+    additional_files: {type: array,   items: string, description: Related context files for multi-file review}
+    history:          {type: array,   items: string, description: Previous actions taken in this episode}
+    step_num:         {type: integer, description: Current step number (0-indexed)}
+    max_steps:        {type: integer, description: Maximum steps allowed per episode}
+
+
+action_space:
+  type: dict
+  description: Actions the agent can take to review the code diff
+  fields:
+    action_type:  {type: string, enum: [detect, classify, review]}
+    issue_types:  {type: array,  items: string, enum: [bug, security, performance, style, none], optional: true}
+    severity:     {type: string, enum: [critical, high, medium, low], optional: true}
+    line_numbers: {type: array,  items: integer, optional: true, description: Line numbers flagged}
+    comment:      {type: string, optional: true, description: Full review comment text}
+
+
+tasks:
+
+  - name: issue_detection
+    difficulty: easy
+    description: >
+      Detect the type(s) of issue present in the code diff.
+      Issue types: bug, security, performance, style, none.
+      Multi-issue detection supported — agent may return a list.
+      Graded using Jaccard similarity for partial credit.
+      False positives (flagging clean code) incur a penalty.
+    max_steps: 3
+    success_threshold: 0.7
+
+  - name: severity_classification
+    difficulty: medium
+    description: >
+      Classify the severity of the code issue (critical/high/medium/low).
+      Context-aware: authentication, payment, and other critical modules
+      demand higher severity ratings. Prior correct detection earns a bonus.
+      Graded by distance from correct severity on a 4-level scale.
+    max_steps: 5
+    success_threshold: 0.8
+
+  - name: full_code_review
+    difficulty: hard
+    description: >
+      Perform a complete multi-step code review pipeline:
+      (1) detect issue type(s), (2) classify severity, (3) write a
+      professional review comment covering issue identification, severity
+      justification, technical keyword usage, concrete fix suggestion,
+      and professional tone. Graded on a 7-criterion rubric.
+      Anti-keyword-stuffing guard prevents trivial gaming.
+      Designed to challenge frontier LLMs.
+    max_steps: 5
+    success_threshold: 0.55
+
+
+endpoints:
+  reset:  POST /reset
+  step:   POST /step
+  state:  GET  /state
+  health: GET  /health

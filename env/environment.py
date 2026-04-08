@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .models import Observation, Action, StepResult
 from .data_generator import generate_code_diff
-from .graders import grade_action, normalize_score   # ← Important import
+from .graders import grade_action, normalize_score
 
 app = FastAPI(
     title="Code Review OpenEnv",
@@ -79,16 +79,22 @@ async def step(action: Action, session_id: str = Query(...)):
 
     session = _get_session(session_id)
 
+    # Get reward from grader
     reward, info = grade_action(action, session)
 
-    # STRICT normalization to ensure (0, 1)
+    # ULTRA STRICT NORMALIZATION
     reward = normalize_score(reward)
 
     session["step"] += 1
 
+    # Update total reward with strict clamping
+    if "total_reward" not in session:
+        session["total_reward"] = 0.0
+
     session["total_reward"] += reward
     session["total_reward"] = normalize_score(session["total_reward"])
 
+    # Log history
     session["history"].append(
         f"step={session['step']} | action={action.action_type} "
         f"| issue_types={action.issue_types} | severity={action.severity}"
@@ -155,11 +161,6 @@ async def schema():
             "language": "string",
             "file_name": "string",
             "context": "string"
-        },
-        "state": {
-            "step": "int",
-            "max_steps": "int",
-            "history": "list"
         }
     }
 

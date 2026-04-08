@@ -79,28 +79,25 @@ async def step(action: Action, session_id: str = Query(...)):
 
     session = _get_session(session_id)
 
-    # Get reward from grader
     reward, info = grade_action(action, session)
 
-    # ULTRA STRICT NORMALIZATION
+    # Maximum safety clamping
     reward = normalize_score(reward)
 
     session["step"] += 1
 
-    # Update total reward with strict clamping
     if "total_reward" not in session:
         session["total_reward"] = 0.0
 
     session["total_reward"] += reward
     session["total_reward"] = normalize_score(session["total_reward"])
 
-    # Log history
     session["history"].append(
         f"step={session['step']} | action={action.action_type} "
         f"| issue_types={action.issue_types} | severity={action.severity}"
     )
 
-    done = (session["step"] >= session["max_steps"]) or info.get("task_complete", False)
+    done = (session["step"] >= session["max_steps"]) or bool(info.get("task_complete", False))
     session["done"] = done
 
     if done:
@@ -175,6 +172,5 @@ async def mcp():
     }
 
 
-# ── RUN ─────────────────────────────────────────────────
 if __name__ == "__main__":
     uvicorn.run("env.environment:app", host="0.0.0.0", port=7860)

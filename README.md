@@ -109,179 +109,110 @@ Anti-gaming guard: keyword-stuffing detection (>15% issue-type density) caps the
 
 ---
 
-## Reward Design
+## Example Scenario
 
-| Situation | Reward |
-|---|---|
-| Exact correct answer | +1.0 |
-| Partial Jaccard match | +0.4 to +0.9 |
-| One severity level off | +0.7 |
-| Two severity levels off | +0.4 |
-| Preparatory step (detect/classify in hard task) | +0.05 |
-| False positive (flagging clean code) | -0.2 |
-| False negative (missing real issue) | -0.1 |
-| Wrong action type | -0.1 |
-| Under-classifying a critical module | -0.2 |
-
----
-
-## Dataset
-
-25 realistic code diff templates across:
-
-- **Languages:** Python, Java, JavaScript, Go
-- **Issue types:** SQL injection, XSS, hardcoded secrets, command injection, path traversal, NPE, off-by-one, resource leak, O(n²) loop, N+1 query, DOM thrashing, style issues, clean code
-- **Contexts:** authentication, payment processing, API handler, service layer, frontend, configuration, file I/O
-- **Difficulty pools:** easy draws single-issue non-critical diffs; medium draws high/critical severity; hard draws multi-issue or multi-file diffs
-
----
-
-## API Endpoints
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/reset` | POST | Start new episode. Query param: `task=easy\|medium\|hard` |
-| `/step` | POST | Submit action. Query params: `session_id` |
-| `/state` | GET | Get current observation. Query params: `session_id` |
-| `/health` | GET | Health check — returns `{"status": "healthy"}` |
-| `/metadata` | GET | Environment name and description |
-| `/schema` | GET | Action, observation, and state schemas |
-| `/mcp` | POST | JSON-RPC endpoint for MCP compatibility |
-
----
-
-## Baseline Scores
-
-Scores from running `inference.py` with `meta-llama/Meta-Llama-3-8B-Instruct`:
-
-| Task | Score | Threshold | Status |
-|---|---|---|---|
-| Easy — Issue Detection | 1.00 | 0.70 | ✅ PASS |
-| Medium — Severity Classification | 1.00 | 0.80 | ✅ PASS |
-| Hard — Full Code Review | 0.82 | 0.55 | ✅ PASS |
-
----
-
-## Quick Start
-
-### Local Setup
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/YOUR_USERNAME/code-review-env.git
-cd code-review-env
-
-# 2. Create virtual environment
-python -m venv venv
-source venv/bin/activate        # Mac/Linux
-# venv\Scripts\activate         # Windows
-
-# 3. Install dependencies
-pip install -r requirements.txt
-
-# 4. Start the environment server
-uvicorn env.environment:app --host 0.0.0.0 --port 7860 --reload
-
-# 5. Verify it's running
-curl http://localhost:7860/health
+```python
+query = "SELECT * FROM users WHERE name = '" + name + "'"
+for i in range(len(data)):
+    for j in range(len(data)):
+        process(data[i], data[j])
 ```
 
-### Run the Baseline Agent
+### Expected AI Behavior:
+
+* Detect: SQL Injection (Security)
+* Detect: Nested Loop (Performance)
+* Assign Severity: Critical
+* Suggest Fix: Use parameterized queries
+
+---
+
+## Evaluation Strategy
+
+The environment ensures:
+
+* Correct answers → High reward
+* Partial answers → Moderate reward
+* Incorrect answers → Low/negative reward
+
+---
+
+## Baseline Agent
+
+We provide a simple agent (`inference.py`) that:
+
+* Interacts with the environment
+* Produces baseline scores
+* Demonstrates environment functionality
+
+---
+
+## How to Run
+
+### 1. Start Environment
 
 ```bash
-# Set your HuggingFace token
-export HF_TOKEN="hf_your_token_here"           # Mac/Linux
-# $env:HF_TOKEN = "hf_your_token_here"         # Windows PowerShell
+uvicorn env.environment:app --reload
+```
 
-# Run inference against the local server
+### 2. Run Agent
+
+```bash
 python inference.py
 ```
 
-### Docker
+---
+
+## Docker Support
 
 ```bash
 docker build -t code-review-env .
 docker run -p 7860:7860 code-review-env
 ```
 
-### Manual API Test
+---
 
-```bash
-# Reset (start a new episode)
-curl -X POST "http://localhost:7860/reset?task=easy"
+## API Endpoints
 
-# Take a step (use session_id from reset response)
-curl -X POST "http://localhost:7860/step?session_id=YOUR_SESSION_ID" \
-  -H "Content-Type: application/json" \
-  -d '{"action_type": "detect", "issue_types": ["security"]}'
-
-# Get current state
-curl "http://localhost:7860/state?session_id=YOUR_SESSION_ID"
-```
+| Endpoint    | Description       |
+| ----------- | ----------------- |
+| POST /reset | Start new episode |
+| POST /step  | Perform action    |
+| GET /state  | Get current state |
+| GET /health | Health check      |
 
 ---
 
-## Deployment
+## Why This Matters
 
-Live on Hugging Face Spaces:
-**https://huggingface.co/spaces/ajaykumar1523/code-review-openenv-ajashia-techno-wizards**
+This project demonstrates:
 
-Set these Secrets in your Space (Settings → Variables and Secrets):
-
-| Variable | Value |
-|---|---|
-| `API_BASE_URL` | `https://router.huggingface.co/v1` |
-| `MODEL_NAME` | `meta-llama/Meta-Llama-3-8B-Instruct` |
-| `HF_TOKEN` | Your HuggingFace access token |
-| `ENV_URL` | Your Space URL |
+* AI evaluation system design
+* Real-world problem modeling
+* Reward engineering
+* Multi-step reasoning environments
 
 ---
 
-## Environment Design Decisions
+## Future Improvements
 
-**Session isolation:** Each `/reset` call creates a unique UUID session. Concurrent
-evaluation requests cannot interfere with each other.
-
-**Partial rewards throughout episodes:** Rather than binary end-of-episode rewards,
-every step returns a meaningful signal. This enables RL agents to learn from
-intermediate feedback.
-
-**Context-aware severity:** The same bug in `auth.py` scores higher severity than
-in `utils.py`. Module criticality is a first-class signal in the grader.
-
-**Anti-gaming guards:** The hard task grader detects keyword stuffing (>15% issue-type
-density) and caps the score at 0.05, preventing trivial reward hacking.
-
-**Hallucination penalty:** Agents that flag issues in clean code receive -0.2 reward,
-encouraging precision over recall.
-
----
-
-## Project Structure
-
-```
-code-review-env/
-├── inference.py          # Baseline LLM agent
-├── openenv.yaml          # Environment metadata
-├── Dockerfile
-├── requirements.txt
-├── env/
-│   ├── environment.py    # FastAPI server (reset / step / state)
-│   ├── models.py         # Pydantic schemas
-│   ├── data_generator.py # 25 realistic code diff templates
-│   └── graders.py        # Reward functions (easy / medium / hard)
-├── tasks/
-│   ├── easy_task.py
-│   ├── medium_task.py
-│   └── hard_task.py
-└── tests/
-    ├── test_graders.py   # 29 unit tests
-    └── test_env.py       # 13 integration tests
-```
+* Integrate real LLMs (GPT, LLaMA)
+* Multi-file code context
+* CI/CD pipeline integration
+* Reinforcement learning training loop
 
 ---
 
 ## Team
 
 **Ajashia Techno Wizards**
-Built for the Meta × Scaler OpenEnv Hackathon — April 2026
+
+---
+
+## Conclusion
+
+This project moves beyond traditional ML by focusing on:
+
+> “Building environments where intelligent agents can be evaluated, improved, and trusted in real-world scenarios.”
+
+---

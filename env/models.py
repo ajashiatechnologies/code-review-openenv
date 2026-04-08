@@ -1,4 +1,5 @@
 from pydantic import BaseModel
+from pydantic import Field
 from typing import List, Optional, Dict, Any
 from enum import Enum
 
@@ -42,7 +43,7 @@ class StepResult(BaseModel):
     observation: Observation
     reward:      float
     done:        bool
-    info:        Dict[str, Any] = {}
+    info: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ResetRequest(BaseModel):

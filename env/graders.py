@@ -4,23 +4,23 @@ from .models import Action
 SEVERITY_ORDER = ["low", "medium", "high", "critical"]
 ALL_ISSUE_WORDS = {"bug", "security", "performance", "style", "none"}
 
-# Very small EPS to ensure strictly (0, 1) — safe for strict validators
-EPS = 1e-6
+EPS = 1e-9   # Even smaller for ultra-strict validators
 
 
 def normalize_score(score: float) -> float:
-    """Force score into strictly open interval (0, 1). Never returns 0.0 or 1.0."""
+    """Ultra-strict normalization: ALWAYS returns value strictly in (0, 1)"""
     score = float(score)
     if score <= 0.0:
         return EPS
     if score >= 1.0:
         return 1.0 - EPS
+    # Add extra safety layer
     return max(EPS, min(1.0 - EPS, score))
 
 
 def grade_action(action: Action, state: dict) -> Tuple[float, Dict[str, Any]]:
     task = state.get("task", "easy")
-    code = state["code"]
+    code = state.get("code", {})
 
     if task == "easy":
         reward, info = grade_detection(action, code)
@@ -29,69 +29,68 @@ def grade_action(action: Action, state: dict) -> Tuple[float, Dict[str, Any]]:
     elif task == "hard":
         reward, info = grade_full_review(action, code, state)
     else:
-        reward, info = 0.05, {"reason": "unknown task"}
+        reward, info = 0.1, {"reason": "unknown task"}
 
-    # ALWAYS normalize at the final step
+    # FINAL SAFETY NET - normalize every single time
     reward = normalize_score(reward)
     return reward, info
 
 
-# ── EASY TASK ──────────────────────────────────────────────────────────────
+# EASY
 def grade_detection(action: Action, code: dict) -> Tuple[float, Dict[str, Any]]:
     if action.action_type != "detect" or not action.issue_types:
         return 0.05, {"reason": "wrong action type or missing issue_types"}
 
-    predicted = set(it.value for it in action.issue_types)
-    correct = set(code["ground_truth_issues"])
+    predicted = set(it.value for it in action.issue_types if it)
+    correct = set(code.get("ground_truth_issues", []))
 
-    if "none" in correct and predicted != {"none"}:
-        return 0.05, {"reason": "false positive", "task_complete": False}
+    if "none" in correct:
+        if predicted == {"none"}:
+            return 0.95, {"task_complete": True, "reason": "correct: no issue"}
+        else:
+            return 0.05, {"reason": "false positive", "task_complete": False}
 
-    if "none" in correct and predicted == {"none"}:
-        return 0.95, {"task_complete": True, "reason": "correct: no issue"}
-
-    if "none" in predicted and "none" not in correct:
+    if "none" in predicted:
         return 0.05, {"reason": "false negative", "task_complete": False}
 
-    if len(predicted) >= len(ALL_ISSUE_WORDS) - 1:
+    if len(predicted) > 4:  # too many issues = stuffing
         return 0.10, {"reason": "keyword stuffing"}
 
     intersection = predicted & correct
     union = predicted | correct
 
-    if intersection == correct and predicted == correct:
+    if predicted == correct:
         return 0.95, {"task_complete": True, "reason": "exact match"}
 
     if intersection:
-        jaccard = len(intersection) / len(union)
-        score = 0.4 + jaccard * 0.5
+        jaccard = len(intersection) / max(len(union), 1)
+        score = 0.4 + jaccard * 0.55
         return score, {"task_complete": False, "reason": "partial match"}
 
-    return 0.05, {"task_complete": False, "reason": "no correct issue detected"}
+    return 0.05, {"task_complete": False, "reason": "no match"}
 
 
-# ── MEDIUM TASK ────────────────────────────────────────────────────────────
+# MEDIUM
 def grade_severity(action: Action, code: dict, state: dict) -> Tuple[float, Dict[str, Any]]:
     if action.action_type != "classify" or action.severity is None:
         return 0.05, {"reason": "wrong action type"}
 
-    correct = code["ground_truth_severity"]
+    correct = code.get("ground_truth_severity", "medium")
     predicted = action.severity.value
 
     c_idx = SEVERITY_ORDER.index(correct)
     p_idx = SEVERITY_ORDER.index(predicted)
     dist = abs(c_idx - p_idx)
 
-    score = 0.90 - dist * 0.20
+    score = 0.85 - (dist * 0.22)
 
-    # Penalty for under-classifying critical modules
     if code.get("critical_module") and p_idx < c_idx:
-        score -= 0.15
+        score -= 0.18
 
-    # Bonus for prior correct detection
+    # Prior detection bonus
     history = state.get("history", [])
-    if any("detect" in h and "task_complete=True" in h for h in history):
-        score += 0.05
+    if any("detect" in h and "task_complete=True" in str(h) for h in history):
+        score += 0.08
 
     return score, {
         "task_complete": dist == 0,
@@ -101,66 +100,48 @@ def grade_severity(action: Action, code: dict, state: dict) -> Tuple[float, Dict
     }
 
 
-# ── HARD TASK ──────────────────────────────────────────────────────────────
+# HARD
 def grade_full_review(action: Action, code: dict, state: dict) -> Tuple[float, Dict[str, Any]]:
     if action.action_type != "review" or not action.comment:
         return 0.05, {"reason": "invalid review action"}
 
     comment = action.comment.lower()
     score = 0.0
-    correct_issues = code["ground_truth_issues"]
+    correct_issues = code.get("ground_truth_issues", [])
     word_count = len(comment.split())
 
-    # Anti-stuffing check
+    # Anti-stuffing
     if word_count > 0:
-        issue_word_hits = sum(1 for w in ALL_ISSUE_WORDS if w in comment)
-        if (issue_word_hits / word_count) > 0.15:
+        issue_hits = sum(1 for w in ALL_ISSUE_WORDS if w in comment)
+        if issue_hits / word_count > 0.18:
             return 0.05, {"reason": "keyword stuffing"}
 
-    # Preparation bonus
+    # Bonuses
     history = state.get("history", [])
-    detected = any("detect" in h for h in history)
-    classified = any("classify" in h for h in history)
+    if any("detect" in h for h in history) and any("classify" in h for h in history):
+        score += 0.18
+    elif any("detect" in h for h in history) or any("classify" in h for h in history):
+        score += 0.08
 
-    if detected and classified:
-        score += 0.15
-    elif detected or classified:
-        score += 0.07
+    if word_count >= 50:
+        score += 0.12
+    elif word_count >= 25:
+        score += 0.06
 
-    # Word count bonus
-    if word_count >= 60:
-        score += 0.10
-    elif word_count >= 30:
-        score += 0.05
-
-    # Issue mention scoring
     if "none" not in correct_issues:
-        matched = [iss for iss in correct_issues if iss in comment]
-        score += (len(matched) / max(len(correct_issues), 1)) * 0.20
+        matched = sum(1 for iss in correct_issues if iss in comment)
+        score += (matched / max(len(correct_issues), 1)) * 0.25
 
-    # Severity mention bonus
-    if code["ground_truth_severity"] in comment:
-        score += 0.10
+    if code.get("ground_truth_severity") in comment:
+        score += 0.12
 
-    # Required keywords
-    keywords = code.get("required_keywords", [])
-    if keywords:
-        kw_hits = sum(1 for k in keywords if k.lower() in comment)
-        score += (kw_hits / len(keywords)) * 0.20
-
-    # Fix suggestion bonus
-    if any(w in comment for w in ["fix", "replace", "avoid", "refactor", "validate"]):
+    if any(w in comment for w in ["fix", "refactor", "suggest", "recommend", "avoid"]):
         score += 0.15
 
-    # Tone bonus
-    if any(w in comment for w in ["suggest", "recommend", "consider"]):
-        score += 0.10
-
-    # False positive penalty
     if "none" in correct_issues:
-        score -= 0.20
+        score = max(0.0, score - 0.25)
 
     return score, {
-        "task_complete": score >= 0.55,
+        "task_complete": score >= 0.50,
         "word_count": word_count,
     }

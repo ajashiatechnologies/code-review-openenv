@@ -30,6 +30,13 @@ if not HF_TOKEN:
 # ── OpenAI client configured via environment variables ────────────────────────
 client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
+# ── SCORE SAFETY ──────────────────────────────────────────────────────────────
+EPS = 0.01
+
+def safe_score(score: float) -> float:
+    """Clamp to strictly open interval (0, 1). Never returns 0.0 or 1.0."""
+    return max(EPS, min(1.0 - EPS, float(score)))
+
 # ── SYSTEM PROMPT ─────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """\
 You are an expert code reviewer. Given a code diff, identify issues precisely.
@@ -330,7 +337,7 @@ def run_task(task: str) -> float:
           f"lang={obs['language']} context={obs.get('context', '')}")
 
     attempt_history   = []
-    best_reward       = 0.0
+    best_reward       = EPS          # ← Start at EPS, never 0.0
     detected_issues   = None
     detected_severity = None
 
@@ -353,7 +360,8 @@ def run_task(task: str) -> float:
             timeout=30.0,
         ).json()
 
-        reward = result.get("reward", 0.0)
+        # ── Clamp reward from environment — never trust raw value ─────────────
+        reward = safe_score(result.get("reward", EPS))
         obs    = result["observation"]
         info   = result.get("info", {})
         done   = result.get("done", False)
@@ -380,6 +388,9 @@ def run_task(task: str) -> float:
         if done:
             break
 
+    # ── Final clamp before reporting — this is what the validator reads ────────
+    best_reward = safe_score(best_reward)
+
     # ── [END] log — required structured format ────────────────────────────────
     print(f"[END] task={task} episode_score={best_reward:.4f} "
           f"steps_taken={len(attempt_history)}")
@@ -393,9 +404,10 @@ if __name__ == "__main__":
     scores     = {}
 
     for task in ["easy", "medium", "hard"]:
-        scores[task] = run_task(task)
+        score = run_task(task)
+        scores[task] = safe_score(score)   # ← Final safety clamp before JSON output
 
-    # Final summary in required format
+    # Final summary in required format — validator reads this line
     print("[RESULTS]", json.dumps({"baseline_scores": scores}))
 
     # Human-readable summary

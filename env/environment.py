@@ -24,6 +24,8 @@ app.add_middleware(
 # ── SESSION STORAGE ─────────────────────────────────────
 _sessions: Dict[str, dict] = {}
 
+EPS = 0.01  # Strictly (0, 1) — safe margin for validator
+
 
 def _get_session(session_id: str) -> dict:
     session = _sessions.get(session_id)
@@ -67,7 +69,6 @@ async def reset(task: str = Query(default="easy")):
         "step": 0,
         "max_steps": 5,
         "done": False,
-        "total_reward": 0.0,
         "history": [],
     }
 
@@ -82,12 +83,11 @@ async def step(action: Action, session_id: str = Query(...)):
 
     reward, info = grade_action(action, session)
 
-    # 🔥 SAFETY: Ensure strict (0,1) even if something slips
-    EPS = 1e-6
-    reward = max(EPS, min(1 - EPS, reward))
+    # Strictly clamp reward to (0, 1) — never 0.0 or 1.0
+    reward = float(reward)
+    reward = max(EPS, min(1.0 - EPS, reward))
 
     session["step"] += 1
-    session["total_reward"] += reward
 
     session["history"].append(
         f"step={session['step']} | action={action.action_type} "
@@ -102,12 +102,11 @@ async def step(action: Action, session_id: str = Query(...)):
 
     return StepResult(
         observation=_build_observation(session),
-        reward=reward,  # ✅ NO ROUNDING
+        reward=reward,
         done=done,
         info={
             **info,
             "step": session["step"],
-            "total_reward": session["total_reward"],  # ✅ NO ROUNDING
             "episode_id": session["session_id"],
         }
     )

@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .models import Observation, Action, StepResult
 from .data_generator import generate_code_diff
-from .graders import grade_action
+from .graders import grade_action, normalize_score   # ← Important import
 
 app = FastAPI(
     title="Code Review OpenEnv",
@@ -23,8 +23,6 @@ app.add_middleware(
 
 # ── SESSION STORAGE ─────────────────────────────────────
 _sessions: Dict[str, dict] = {}
-
-EPS = 0.01  # Strictly (0, 1) — safe margin for validator
 
 
 def _get_session(session_id: str) -> dict:
@@ -55,7 +53,6 @@ def _build_observation(session: dict) -> Observation:
 # ── POST /reset ─────────────────────────────────────────
 @app.post("/reset", response_model=Observation)
 async def reset(task: str = Query(default="easy")):
-
     if task not in {"easy", "medium", "hard"}:
         raise HTTPException(status_code=400, detail="Invalid task")
 
@@ -70,6 +67,7 @@ async def reset(task: str = Query(default="easy")):
         "max_steps": 5,
         "done": False,
         "history": [],
+        "total_reward": 0.0,
     }
 
     return _build_observation(_sessions[session_id])
@@ -83,11 +81,13 @@ async def step(action: Action, session_id: str = Query(...)):
 
     reward, info = grade_action(action, session)
 
-    # Strictly clamp reward to (0, 1) — never 0.0 or 1.0
-    reward = float(reward)
-    reward = max(EPS, min(1.0 - EPS, reward))
+    # STRICT normalization to ensure (0, 1)
+    reward = normalize_score(reward)
 
     session["step"] += 1
+
+    session["total_reward"] += reward
+    session["total_reward"] = normalize_score(session["total_reward"])
 
     session["history"].append(
         f"step={session['step']} | action={action.action_type} "
@@ -107,6 +107,7 @@ async def step(action: Action, session_id: str = Query(...)):
         info={
             **info,
             "step": session["step"],
+            "total_reward": session["total_reward"],
             "episode_id": session["session_id"],
         }
     )

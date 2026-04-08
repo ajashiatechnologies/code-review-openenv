@@ -1,5 +1,4 @@
 import uuid
-import uvicorn
 from typing import Dict
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -81,7 +80,7 @@ async def step(action: Action, session_id: str = Query(...)):
 
     reward, info = grade_action(action, session)
 
-    # Maximum safety clamping
+    # Maximum safety clamping for Phase 2 validator
     reward = normalize_score(reward)
 
     session["step"] += 1
@@ -170,7 +169,3 @@ async def mcp():
         "result": "ok",
         "id": 1
     }
-
-
-if __name__ == "__main__":
-    uvicorn.run("env.environment:app", host="0.0.0.0", port=7860)

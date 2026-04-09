@@ -20,17 +20,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── SESSION STORAGE ─────────────────────────────────────
 _sessions: Dict[str, dict] = {}
 
 
 def _get_session(session_id: str) -> dict:
     session = _sessions.get(session_id)
     if not session or session.get("done"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"No active episode for session '{session_id}'. Call POST /reset first."
-        )
+        raise HTTPException(status_code=400, detail=f"No active episode for session '{session_id}'. Call POST /reset first.")
     return session
 
 
@@ -49,7 +45,6 @@ def _build_observation(session: dict) -> Observation:
     )
 
 
-# ── POST /reset ─────────────────────────────────────────
 @app.post("/reset", response_model=Observation)
 async def reset(task: str = Query(default="easy")):
     if task not in {"easy", "medium", "hard"}:
@@ -72,7 +67,6 @@ async def reset(task: str = Query(default="easy")):
     return _build_observation(_sessions[session_id])
 
 
-# ── POST /step ──────────────────────────────────────────
 @app.post("/step", response_model=StepResult)
 async def step(action: Action, session_id: str = Query(...)):
 
@@ -80,7 +74,7 @@ async def step(action: Action, session_id: str = Query(...)):
 
     reward, info = grade_action(action, session)
 
-    # Maximum safety clamping for Phase 2 validator
+    # Double clamping for maximum safety
     reward = normalize_score(reward)
 
     session["step"] += 1
@@ -115,34 +109,22 @@ async def step(action: Action, session_id: str = Query(...)):
     )
 
 
-# ── GET /state ──────────────────────────────────────────
 @app.get("/state", response_model=Observation)
 async def state(session_id: str = Query(...)):
     session = _get_session(session_id)
     return _build_observation(session)
 
 
-# ── GET /health ─────────────────────────────────────────
 @app.get("/health")
 async def health():
-    return {
-        "status": "healthy",
-        "environment": "code-review-openenv",
-        "version": "1.0.0",
-        "active_sessions": len(_sessions),
-    }
+    return {"status": "healthy", "environment": "code-review-openenv", "version": "1.0.0", "active_sessions": len(_sessions)}
 
 
-# ── GET /metadata ───────────────────────────────────────
 @app.get("/metadata")
 async def metadata():
-    return {
-        "name": "Code Review OpenEnv",
-        "description": "AI agent environment for automated code review evaluation"
-    }
+    return {"name": "Code Review OpenEnv", "description": "AI agent environment for automated code review evaluation"}
 
 
-# ── GET /schema ─────────────────────────────────────────
 @app.get("/schema")
 async def schema():
     return {
@@ -161,11 +143,6 @@ async def schema():
     }
 
 
-# ── POST /mcp ───────────────────────────────────────────
 @app.post("/mcp")
 async def mcp():
-    return {
-        "jsonrpc": "2.0",
-        "result": "ok",
-        "id": 1
-    }
+    return {"jsonrpc": "2.0", "result": "ok", "id": 1}

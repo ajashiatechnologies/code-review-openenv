@@ -4,22 +4,22 @@ from .models import Action
 SEVERITY_ORDER = ["low", "medium", "high", "critical"]
 ALL_ISSUE_WORDS = {"bug", "security", "performance", "style", "none"}
 
-EPS = 0.05
+EPS = 0.06   # Larger safety margin
 
 
 def normalize_score(score: float) -> float:
-    """Maximum safety normalization for Phase 2 - never 0.0 or 1.0"""
+    """Maximum safety: forces EVERY score strictly between 0.06 and 0.88"""
     score = float(score)
     
     if score <= 0.0:
         return EPS
-    if score >= 0.90:
-        return 0.90 - EPS
+    if score >= 0.88:
+        return 0.88 - EPS
     
-    score = max(EPS, min(0.90 - EPS, score))
+    score = max(EPS, min(0.88 - EPS, score))
     
     # Final absolute safety
-    if score <= 0.0 or score >= 0.90:
+    if score <= 0.0 or score >= 0.88:
         return 0.5
     
     return score
@@ -38,7 +38,6 @@ def grade_action(action: Action, state: dict) -> Tuple[float, Dict[str, Any]]:
     else:
         reward, info = 0.5, {"reason": "unknown task"}
 
-    # This is the critical safety line
     reward = normalize_score(reward)
     return reward, info
 
@@ -46,33 +45,33 @@ def grade_action(action: Action, state: dict) -> Tuple[float, Dict[str, Any]]:
 # EASY
 def grade_detection(action: Action, code: dict) -> Tuple[float, Dict[str, Any]]:
     if action.action_type != "detect" or not action.issue_types:
-        return 0.30, {"reason": "invalid detect action"}
+        return normalize_score(0.30), {"reason": "invalid detect action"}
 
     predicted = {it.value for it in action.issue_types if it}
     correct = set(code.get("ground_truth_issues", []))
 
     if predicted == correct and correct:
-        return 0.85, {"task_complete": True, "reason": "exact match"}
+        return normalize_score(0.85), {"task_complete": True, "reason": "exact match"}
 
     if "none" in correct:
-        return 0.85 if predicted == {"none"} else 0.25, {"task_complete": predicted == {"none"}}
+        return normalize_score(0.85 if predicted == {"none"} else 0.25), {"task_complete": predicted == {"none"}}
 
     if "none" in predicted:
-        return 0.25, {"reason": "false negative"}
+        return normalize_score(0.25), {"reason": "false negative"}
 
     intersection = predicted & correct
     if intersection:
         jaccard = len(intersection) / max(len(predicted | correct), 1)
         score = 0.45 + jaccard * 0.40
-        return score, {"reason": "partial match"}
+        return normalize_score(score), {"reason": "partial match"}
 
-    return 0.30, {"reason": "no match"}
+    return normalize_score(0.30), {"reason": "no match"}
 
 
 # MEDIUM
 def grade_severity(action: Action, code: dict, state: dict) -> Tuple[float, Dict[str, Any]]:
     if action.action_type != "classify" or action.severity is None:
-        return 0.40, {"reason": "invalid classify action"}
+        return normalize_score(0.40), {"reason": "invalid classify action"}
 
     correct = code.get("ground_truth_severity", "medium")
     predicted = action.severity.value
@@ -83,13 +82,13 @@ def grade_severity(action: Action, code: dict, state: dict) -> Tuple[float, Dict
     if code.get("critical_module") and SEVERITY_ORDER.index(predicted) < SEVERITY_ORDER.index(correct):
         score -= 0.08
 
-    return score, {"task_complete": dist == 0}
+    return normalize_score(score), {"task_complete": dist == 0}
 
 
 # HARD
 def grade_full_review(action: Action, code: dict, state: dict) -> Tuple[float, Dict[str, Any]]:
     if action.action_type != "review" or not action.comment:
-        return 0.35, {"reason": "invalid review action"}
+        return normalize_score(0.35), {"reason": "invalid review action"}
 
     comment = action.comment.lower()
     score = 0.45
@@ -114,4 +113,4 @@ def grade_full_review(action: Action, code: dict, state: dict) -> Tuple[float, D
     if "none" in correct_issues:
         score = max(0.35, score - 0.10)
 
-    return score, {"task_complete": score >= 0.55}
+    return normalize_score(score), {"task_complete": score >= 0.55}

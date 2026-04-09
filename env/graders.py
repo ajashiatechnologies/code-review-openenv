@@ -8,7 +8,7 @@ EPS = 0.05
 
 
 def normalize_score(score: float) -> float:
-    """Maximum safety: every reward is forced between 0.05 and 0.90"""
+    """Maximum safety normalization for Phase 2 - never 0.0 or 1.0"""
     score = float(score)
     
     if score <= 0.0:
@@ -18,7 +18,7 @@ def normalize_score(score: float) -> float:
     
     score = max(EPS, min(0.90 - EPS, score))
     
-    # Final fallback - never allow boundary
+    # Final absolute safety
     if score <= 0.0 or score >= 0.90:
         return 0.5
     
@@ -38,7 +38,7 @@ def grade_action(action: Action, state: dict) -> Tuple[float, Dict[str, Any]]:
     else:
         reward, info = 0.5, {"reason": "unknown task"}
 
-    # This line is the most important safety net
+    # This is the critical safety line
     reward = normalize_score(reward)
     return reward, info
 

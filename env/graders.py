@@ -4,22 +4,21 @@ from .models import Action
 SEVERITY_ORDER = ["low", "medium", "high", "critical"]
 ALL_ISSUE_WORDS = {"bug", "security", "performance", "style", "none"}
 
-EPS = 0.06
+EPS = 0.07
 
 
 def normalize_score(score: float) -> float:
-    """Maximum safety normalization - NEVER returns 0.0 or 1.0"""
+    """Maximum safety - every reward is forced between 0.07 and 0.85"""
     score = float(score)
     
     if score <= 0.0:
         return EPS
-    if score >= 0.88:
-        return 0.88 - EPS
+    if score >= 0.85:
+        return 0.85 - EPS
     
-    score = max(EPS, min(0.88 - EPS, score))
+    score = max(EPS, min(0.85 - EPS, score))
     
-    # Final absolute safety fallback
-    if score <= 0.0 or score >= 0.88:
+    if score <= 0.0 or score >= 0.85:
         return 0.5
     
     return score
@@ -38,12 +37,11 @@ def grade_action(action: Action, state: dict) -> Tuple[float, Dict[str, Any]]:
     else:
         reward, info = 0.5, {"reason": "unknown task"}
 
-    # Global safety net - applied to EVERY return
+    # This is the most important line - applied to EVERY return
     reward = normalize_score(reward)
     return reward, info
 
 
-# ── EASY ──────────────────────────────────────────────────────────────
 def grade_detection(action: Action, code: dict) -> Tuple[float, Dict[str, Any]]:
     if action.action_type != "detect" or not action.issue_types:
         return normalize_score(0.30), {"reason": "invalid detect action"}
@@ -69,7 +67,6 @@ def grade_detection(action: Action, code: dict) -> Tuple[float, Dict[str, Any]]:
     return normalize_score(0.30), {"reason": "no match"}
 
 
-# ── MEDIUM ─────────────────────────────────────────────────────────────
 def grade_severity(action: Action, code: dict, state: dict) -> Tuple[float, Dict[str, Any]]:
     if action.action_type != "classify" or action.severity is None:
         return normalize_score(0.40), {"reason": "invalid classify action"}
@@ -86,7 +83,6 @@ def grade_severity(action: Action, code: dict, state: dict) -> Tuple[float, Dict
     return normalize_score(score), {"task_complete": dist == 0}
 
 
-# ── HARD ───────────────────────────────────────────────────────────────
 def grade_full_review(action: Action, code: dict, state: dict) -> Tuple[float, Dict[str, Any]]:
     if action.action_type != "review" or not action.comment:
         return normalize_score(0.35), {"reason": "invalid review action"}

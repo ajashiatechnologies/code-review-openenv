@@ -13,6 +13,9 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Compatibility alias for ASGI loaders that look for `application`.
+application = app
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

@@ -55,16 +55,25 @@ def _build_observation(session: dict) -> Observation:
 # ── POST /reset ─────────────────────────────────────────
 @app.post("/reset", response_model=Observation)
 async def reset(task: str = Query(default="easy")):
-    if task not in {"easy", "medium", "hard"}:
+    task_aliases = {
+        "easy": "easy",
+        "medium": "medium",
+        "hard": "hard",
+        "issue_detection": "easy",
+        "severity_classification": "medium",
+        "full_code_review": "hard",
+    }
+    normalized_task = task_aliases.get(task)
+    if normalized_task is None:
         raise HTTPException(status_code=400, detail="Invalid task")
 
     session_id = str(uuid.uuid4())
-    code = generate_code_diff(task)
+    code = generate_code_diff(normalized_task)
 
     _sessions[session_id] = {
         "session_id": session_id,
         "code": code,
-        "task": task,
+        "task": normalized_task,
         "step": 0,
         "max_steps": 5,
         "done": False,

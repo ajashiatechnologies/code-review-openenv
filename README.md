@@ -1,3 +1,12 @@
+---
+title: Code Review OpenEnv
+emoji: "🧠"
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+pinned: false
+---
+
 # 🔍 Code Review OpenEnv
 
 **A real-world AI agent evaluation environment for automated code review tasks.**

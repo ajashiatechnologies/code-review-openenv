@@ -407,23 +407,16 @@ def run_task(task: str) -> float:
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    thresholds = {"easy": 0.70, "medium": 0.80, "hard": 0.55}
-    scores     = {}
+    scores = {}
 
     for task in ["easy", "medium", "hard"]:
         score = run_task(task)
         scores[task] = safe_score(score)   # ← Final safety clamp before JSON output
 
-    # Final summary in required format — validator reads this line
-    print("[RESULTS]", json.dumps({"baseline_scores": scores}))
-
-    # Human-readable summary
-    print("\n" + "="*52)
-    print("  BASELINE SCORES")
-    print("="*52)
-    for task, score in scores.items():
-        threshold = thresholds[task]
-        status    = "PASS" if score >= threshold else "FAIL"
-        bar       = "█" * int(score * 20)
-        print(f"  {task:<8}: {score:.4f}  {bar:<20}  [{status}]")
-    print("="*52)
+    # Final summary in required format — validator reads this line.
+    # Keep output minimal and unambiguous for strict parsers.
+    payload = {
+        "baseline_scores": scores,
+        "task_scores": scores,
+    }
+    print("[RESULTS]", json.dumps(payload, ensure_ascii=True))

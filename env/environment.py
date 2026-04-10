@@ -138,7 +138,10 @@ async def step(action: Any = Body(...), session_id: str = Query(...)):
     session = _get_session(session_id)
     safe_action = _coerce_action(action)
 
-    reward, info = grade_action(safe_action, session)
+    try:
+        reward, info = grade_action(safe_action, session)
+    except Exception as exc:
+        reward, info = 0.5, {"reason": f"step_exception:{type(exc).__name__}"}
 
     # Double safety clamping
     reward = normalize_score(reward)

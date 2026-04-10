@@ -34,16 +34,19 @@ def grade_action(action: Action, state: dict) -> Tuple[float, Dict[str, Any]]:
     task = state.get("task", "easy")
     code = state.get("code", {})
 
-    if task == "easy":
-        reward, info = grade_detection(action, code)
-    elif task == "medium":
-        reward, info = grade_severity(action, code, state)
-    elif task == "hard":
-        reward, info = grade_full_review(action, code, state)
-    else:
-        reward, info = 0.5, {"reason": "unknown task"}
+    try:
+        if task == "easy":
+            reward, info = grade_detection(action, code)
+        elif task == "medium":
+            reward, info = grade_severity(action, code, state)
+        elif task == "hard":
+            reward, info = grade_full_review(action, code, state)
+        else:
+            reward, info = 0.5, {"reason": "unknown task"}
+    except Exception as exc:
+        reward, info = 0.5, {"reason": f"grader_exception:{type(exc).__name__}"}
 
-    # This is the most important line - applied to EVERY return
+    # This is the most important line - applied to EVERY return.
     reward = normalize_score(reward)
     return reward, info
 

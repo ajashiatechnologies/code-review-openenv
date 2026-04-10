@@ -1,4 +1,5 @@
 from typing import Tuple, Dict, Any
+import math
 from .models import Action
 
 SEVERITY_ORDER = ["low", "medium", "high", "critical"]
@@ -9,7 +10,12 @@ EPS = 0.07
 
 def normalize_score(score: float) -> float:
     """Maximum safety - every reward is forced between 0.07 and 0.85"""
-    score = float(score)
+    try:
+        score = float(score)
+    except (TypeError, ValueError):
+        return 0.5
+    if not math.isfinite(score):
+        return 0.5
     
     if score <= 0.0:
         return EPS

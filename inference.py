@@ -12,6 +12,7 @@ Checklist compliance:
 import os
 import sys
 import json
+import math
 import httpx
 from openai import OpenAI
 
@@ -35,7 +36,13 @@ EPS = 0.01
 
 def safe_score(score: float) -> float:
     """Clamp to strictly open interval (0, 1). Never returns 0.0 or 1.0."""
-    return max(EPS, min(1.0 - EPS, float(score)))
+    try:
+        value = float(score)
+    except (TypeError, ValueError):
+        return 0.5
+    if not math.isfinite(value):
+        return 0.5
+    return max(EPS, min(1.0 - EPS, value))
 
 # ── SYSTEM PROMPT ─────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """\

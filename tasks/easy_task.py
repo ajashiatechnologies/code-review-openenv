@@ -13,11 +13,11 @@ TASK_CONFIG = {
     "success_threshold":  0.7,
     "required_action":    "detect",
     "scoring": {
-        "exact_match":       1.0,
-        "partial_jaccard":   "0.4 + jaccard * 0.5",
-        "false_positive":   -0.2,
-        "false_negative":   -0.1,
-        "keyword_stuffing":  0.1,
-        "wrong_action":     -0.1,
+        "exact_match":       0.99,
+        "partial_jaccard":   "0.35 + jaccard * 0.60",
+        "false_positive":    0.05,
+        "false_negative":    0.10,
+        "keyword_stuffing":  0.08,
+        "wrong_action":      0.12,
     },
 }

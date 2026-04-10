@@ -23,7 +23,7 @@ TASK_CONFIG = {
         "professional_tone":    0.10,
     },
     "penalties": {
-        "false_positive":      -0.20,
+        "false_positive":      0.06,
         "keyword_stuffing":     0.05,
     },
 }

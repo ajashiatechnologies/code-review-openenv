@@ -408,6 +408,11 @@ def run_task(task: str) -> float:
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     scores = {}
+    task_name_map = {
+        "easy": "issue_detection",
+        "medium": "severity_classification",
+        "hard": "full_code_review",
+    }
 
     for task in ["easy", "medium", "hard"]:
         score = run_task(task)
@@ -415,8 +420,11 @@ if __name__ == "__main__":
 
     # Final summary in required format — validator reads this line.
     # Keep output minimal and unambiguous for strict parsers.
+    canonical_task_scores = {
+        task_name_map[k]: v for k, v in scores.items() if k in task_name_map
+    }
     payload = {
-        "baseline_scores": scores,
-        "task_scores": scores,
+        "baseline_scores": scores,            # compatibility: difficulty keys
+        "task_scores": canonical_task_scores, # canonical task keys from openenv.yaml
     }
     print("[RESULTS]", json.dumps(payload, ensure_ascii=True))

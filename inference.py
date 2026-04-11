@@ -21,6 +21,17 @@ API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME   = os.getenv("MODEL_NAME",   "meta-llama/Meta-Llama-3-8B-Instruct")
 HF_TOKEN     = os.getenv("HF_TOKEN")          # no default — required
 ENV_URL      = os.getenv("ENV_URL",      "http://localhost:7860")
+BENCHMARK    = "code-review-openenv"
+TASK_NAME_MAP = {
+    "easy": "issue_detection",
+    "medium": "severity_classification",
+    "hard": "full_code_review",
+}
+TASK_THRESHOLDS = {
+    "easy": 0.70,
+    "medium": 0.80,
+    "hard": 0.55,
+}
 
 if not HF_TOKEN:
     print("[ERROR] HF_TOKEN environment variable is not set.")
@@ -43,6 +54,28 @@ def safe_score(score: float) -> float:
     if not math.isfinite(value):
         return 0.5
     return max(EPS, min(1.0 - EPS, value))
+
+
+def log_start(task: str, env: str, model: str) -> None:
+    print(f"[START] task={task} env={env} model={model}", flush=True)
+
+
+def log_step(step: int, action: dict, reward: float, done: bool, error: str | None) -> None:
+    action_text = json.dumps(action, ensure_ascii=True, separators=(",", ":"))
+    error_text = "none" if error is None else str(error).replace("\r", " ").replace("\n", " ")
+    print(
+        f"[STEP] step={step} action={action_text} reward={reward:.3f} "
+        f"done={str(done).lower()} error={error_text}",
+        flush=True,
+    )
+
+
+def log_end(success: bool, steps: int, score: float, rewards: list[float]) -> None:
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(
+        f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
+        flush=True,
+    )
 
 # ── SYSTEM PROMPT ─────────────────────────────────────────────────────────────
 SYSTEM_PROMPT = """\
@@ -331,22 +364,20 @@ def call_llm(obs: dict, task: str, attempt_history: list,
 
 # ── RUN TASK ──────────────────────────────────────────────────────────────────
 def run_task(task: str) -> float:
-
-    # ── [START] log — required structured format ──────────────────────────────
-    print(f"[START] task={task} model={MODEL_NAME} env={ENV_URL}")
+    canonical_task = TASK_NAME_MAP[task]
+    log_start(task=canonical_task, env=BENCHMARK, model=MODEL_NAME)
 
     resp = httpx.post(f"{ENV_URL}/reset", params={"task": task}, timeout=30.0)
     resp.raise_for_status()
     obs        = resp.json()
     session_id = obs["session_id"]
 
-    print(f"[START] session_id={session_id} file={obs['file_name']} "
-          f"lang={obs['language']} context={obs.get('context', '')}")
-
     attempt_history   = []
     best_reward       = EPS          # ← Start at EPS, never 0.0
     detected_issues   = None
     detected_severity = None
+    rewards          = []
+    steps_taken      = 0
 
     for step_i in range(5):
         action = call_llm(obs, task, attempt_history,
@@ -375,6 +406,8 @@ def run_task(task: str) -> float:
 
         if reward > best_reward:
             best_reward = reward
+        rewards.append(reward)
+        steps_taken = step_i + 1
 
         reason = info.get("reason", "")
         attempt_history.append((
@@ -383,24 +416,14 @@ def run_task(task: str) -> float:
             reason
         ))
 
-        # ── [STEP] log — required structured format ───────────────────────────
-        print(f"[STEP] task={task} step={step_i + 1} "
-              f"action={action.get('action_type')} "
-              f"detail={action.get('issue_types') or action.get('severity') or '(review)'} "
-              f"reward={reward:.4f} "
-              f"best_so_far={best_reward:.4f} "
-              f"done={done} "
-              f"reason={reason}")
+        log_step(step=step_i + 1, action=action, reward=reward, done=done, error=None)
 
         if done:
             break
 
-    # ── Final clamp before reporting — this is what the validator reads ────────
     best_reward = safe_score(best_reward)
-
-    # ── [END] log — required structured format ────────────────────────────────
-    print(f"[END] task={task} episode_score={best_reward:.4f} "
-          f"steps_taken={len(attempt_history)}")
+    success = best_reward >= TASK_THRESHOLDS[task]
+    log_end(success=success, steps=steps_taken, score=best_reward, rewards=rewards)
 
     return best_reward
 
@@ -408,19 +431,12 @@ def run_task(task: str) -> float:
 # ── MAIN ──────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     scores = {}
-    task_name_map = {
-        "easy": "issue_detection",
-        "medium": "severity_classification",
-        "hard": "full_code_review",
-    }
 
     for task in ["easy", "medium", "hard"]:
         score = run_task(task)
         scores[task] = safe_score(score)   # ← Final safety clamp before JSON output
 
-    # Final summary in required format — validator reads this line.
-    # Keep output minimal and unambiguous for strict parsers.
-    canonical_task_scores = {task_name_map[k]: v for k, v in scores.items() if k in task_name_map}
+    canonical_task_scores = {TASK_NAME_MAP[k]: v for k, v in scores.items() if k in TASK_NAME_MAP}
     payload = {
         "baseline_scores": canonical_task_scores,
         "task_scores": canonical_task_scores,

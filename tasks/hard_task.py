@@ -14,16 +14,22 @@ TASK_CONFIG = {
     "success_threshold":  0.55,
     "required_action_final": "review",
     "rubric": {
-        "preparation_bonus":    0.15,
+        "base":                 0.18,
+        "preparation_bonus":    0.07,
         "word_count":           0.10,
         "issue_mention":        0.20,
         "severity_mention":     0.10,
-        "keyword_coverage":     0.20,
-        "fix_suggestion":       0.15,
-        "professional_tone":    0.10,
+        "keyword_coverage":     0.15,
+        "fix_suggestion":       0.10,
+        "professional_tone":    0.08,
     },
     "penalties": {
-        "false_positive":      0.06,
-        "keyword_stuffing":     0.05,
+        "false_positive":       0.12,
+        "keyword_stuffing_cap": 0.16,
     },
+    "stage_rewards": {
+        "detect":              "0.18 + (detect_score - 0.02) * 0.45",
+        "classify":            "0.20 + (classify_score - 0.02) * 0.55",
+    },
+    "contract": "all task scores remain strictly within (0, 1)",
 }

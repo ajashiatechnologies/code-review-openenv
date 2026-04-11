@@ -81,7 +81,7 @@ Detect the type(s) of issue present in the code diff.
 
 - **Required action:** `detect` with `issue_types`
 - **Grading:** Jaccard similarity between predicted and correct issue sets
-- **Scoring:** 1.0 exact match, 0.4–0.9 partial, -0.1 false negative, -0.2 false positive
+- **Scoring:** strict open-interval rewards only; exact matches score around `0.92`, partial matches stay in the mid-range, and wrong answers stay above `0.0`
 - **Success threshold:** 0.70
 - **Max steps:** 3
 
@@ -90,7 +90,7 @@ Classify the severity of the detected issue considering module criticality.
 
 - **Required action:** `classify` with `severity`
 - **Grading:** Distance on 4-level severity scale (critical > high > medium > low)
-- **Scoring:** 1.0 exact, 0.7 one step off, 0.4 two steps off; -0.2 penalty for under-classifying critical modules
+- **Scoring:** exact matches score around `0.90`, one-step misses around `0.72`, and under-classifying critical modules applies a small penalty while keeping scores strictly inside `(0, 1)`
 - **Success threshold:** 0.80
 - **Max steps:** 5
 
@@ -98,7 +98,7 @@ Classify the severity of the detected issue considering module criticality.
 Multi-step pipeline: detect → classify → write a professional review comment.
 
 - **Required actions:** `detect`, then `classify`, then `review`
-- **Grading:** 7-criterion rubric (see below)
+- **Grading:** staged pipeline rewards for `detect` and `classify`, followed by a 7-criterion rubric for the final review comment
 - **Success threshold:** 0.55
 - **Max steps:** 5
 
@@ -106,15 +106,16 @@ Multi-step pipeline: detect → classify → write a professional review comment
 
 | Criterion | Weight | Description |
 |---|---|---|
-| Preparation bonus | 0.15 | Detect + classify completed before review |
+| Base score | 0.18 | Gives the review stage a non-zero starting point while staying inside `(0, 1)` |
+| Preparation bonus | 0.07 | Exact detect + classify completed before review |
 | Word count | 0.10 | ≥ 60 words |
 | Issue mention | 0.20 | Names every detected issue type |
 | Severity mention | 0.10 | Uses the exact severity word |
-| Technical keywords | 0.20 | Covers required domain terms (e.g. SQL injection, O(n²)) |
-| Concrete fix | 0.15 | Uses replace/avoid/refactor/sanitize language |
-| Professional tone | 0.10 | Uses recommend/suggest/consider |
+| Technical keywords | 0.15 | Covers required domain terms (e.g. SQL injection, O(n²)) |
+| Concrete fix | 0.10 | Uses replace/avoid/refactor/sanitize language |
+| Professional tone | 0.08 | Uses recommend/suggest/consider |
 
-Anti-gaming guard: keyword-stuffing detection (>15% issue-type density) caps the score at 0.05.
+Anti-gaming guard: keyword-stuffing detection caps the score at a low but still valid open-interval value.
 
 ---
 
@@ -142,7 +143,7 @@ The environment ensures:
 
 * Correct answers → High reward
 * Partial answers → Moderate reward
-* Incorrect answers → Low/negative reward
+* Incorrect answers → Low but still valid reward inside `(0, 1)`
 
 ---
 

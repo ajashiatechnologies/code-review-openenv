@@ -32,7 +32,7 @@ if not HF_TOKEN:
 client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
 # ── SCORE SAFETY ──────────────────────────────────────────────────────────────
-EPS = 0.01
+EPS = 0.02
 
 def safe_score(score: float) -> float:
     """Clamp to strictly open interval (0, 1). Never returns 0.0 or 1.0."""
@@ -421,13 +421,8 @@ if __name__ == "__main__":
     # Final summary in required format — validator reads this line.
     # Keep output minimal and unambiguous for strict parsers.
     canonical_task_scores = {task_name_map[k]: v for k, v in scores.items() if k in task_name_map}
-    merged_scores = {}
-    merged_scores.update(scores)
-    merged_scores.update(canonical_task_scores)
     payload = {
-        # Include both naming styles in both fields so strict validators cannot
-        # mis-map missing keys to 0.0.
-        "baseline_scores": merged_scores,
-        "task_scores": merged_scores,
+        "baseline_scores": canonical_task_scores,
+        "task_scores": canonical_task_scores,
     }
     print("[RESULTS]", json.dumps(payload, ensure_ascii=True))

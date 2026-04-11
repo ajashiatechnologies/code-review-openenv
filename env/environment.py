@@ -25,6 +25,11 @@ app.add_middleware(
 
 # ── SESSION STORAGE ─────────────────────────────────────
 _sessions: Dict[str, dict] = {}
+TASK_MAX_STEPS = {
+    "easy": 3,
+    "medium": 5,
+    "hard": 5,
+}
 
 
 def _get_session(session_id: str) -> dict:
@@ -122,7 +127,7 @@ async def reset(task: str = Query(default="easy")):
         "code": code,
         "task": normalized_task,
         "step": 0,
-        "max_steps": 5,
+        "max_steps": TASK_MAX_STEPS[normalized_task],
         "done": False,
         "history": [],
         "total_reward": 0.0,
@@ -156,7 +161,9 @@ async def step(action: Any = Body(...), session_id: str = Query(...)):
 
     session["history"].append(
         f"step={session['step']} | action={safe_action.action_type} "
-        f"| issue_types={safe_action.issue_types} | severity={safe_action.severity}"
+        f"| issue_types={safe_action.issue_types} | severity={safe_action.severity} "
+        f"| task_complete={info.get('task_complete', False)} "
+        f"| reason={info.get('reason', '')}"
     )
 
     done = (session["step"] >= session["max_steps"]) or bool(info.get("task_complete", False))
@@ -220,6 +227,14 @@ async def schema():
             "language": "string",
             "file_name": "string",
             "context": "string"
+        },
+        "state": {
+            "session_id": "string",
+            "task": "easy | medium | hard",
+            "step": "integer",
+            "max_steps": "integer",
+            "history": ["string"],
+            "total_reward": "float"
         }
     }
 

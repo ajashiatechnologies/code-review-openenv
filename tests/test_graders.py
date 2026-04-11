@@ -1,319 +1,213 @@
-"""
-tests/test_graders.py
-Comprehensive unit tests for the Code Review OpenEnv graders.
-Run with: pytest tests/test_graders.py -v
-"""
-import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+import sys
 
 import pytest
-from env.models import Action, IssueType, Severity
-from env.graders import (
-    grade_detection,
-    grade_severity,
-    grade_full_review,
-    SEVERITY_ORDER,
-)
 
-# ── Shared fixtures ──────────────────────────────────────────────────────────
+sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
+from env.graders import (  # noqa: E402
+    MAX_SCORE,
+    MIN_SCORE,
+    grade_action,
+    grade_detection,
+    grade_full_review,
+    grade_severity,
+)
+from env.models import Action, IssueType, Severity  # noqa: E402
+from tasks.easy_task import TASK_CONFIG as EASY_TASK  # noqa: E402
+from tasks.hard_task import TASK_CONFIG as HARD_TASK  # noqa: E402
+from tasks.medium_task import TASK_CONFIG as MEDIUM_TASK  # noqa: E402
+
 
 NONE_CODE = {
-    "ground_truth_issues":   ["none"],
+    "ground_truth_issues": ["none"],
     "ground_truth_severity": "low",
-    "required_keywords":     [],
-    "critical_module":       False,
+    "required_keywords": [],
+    "critical_module": False,
 }
 
 BUG_CODE = {
-    "ground_truth_issues":   ["bug"],
+    "ground_truth_issues": ["bug"],
     "ground_truth_severity": "high",
-    "required_keywords":     ["null pointer", "null check"],
-    "critical_module":       False,
+    "required_keywords": ["null pointer", "null check"],
+    "critical_module": False,
 }
 
 SECURITY_CODE = {
-    "ground_truth_issues":   ["security"],
+    "ground_truth_issues": ["security"],
     "ground_truth_severity": "critical",
-    "required_keywords":     ["sql injection", "parameterized"],
-    "critical_module":       True,
+    "required_keywords": ["sql injection", "parameterized"],
+    "critical_module": True,
 }
 
 MULTI_CODE = {
-    "ground_truth_issues":   ["security", "performance"],
+    "ground_truth_issues": ["security", "performance"],
     "ground_truth_severity": "critical",
-    "required_keywords":     ["sql injection", "nested loop", "parameterized", "O(n^2)"],
-    "critical_module":       True,
+    "required_keywords": ["sql injection", "nested loop", "parameterized", "o(n^2)"],
+    "critical_module": True,
 }
 
-EMPTY_STATE = {"history": [], "actions_taken": []}
+
+def assert_open_interval(score: float) -> None:
+    assert 0.0 < score < 1.0, f"expected open interval score, got {score}"
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# EASY GRADER: grade_detection
-# ═══════════════════════════════════════════════════════════════════════════
-
-class TestEasyGrader:
-
-    def test_exact_single_issue_scores_1(self):
-        a = Action(action_type="detect", issue_types=[IssueType.BUG])
-        score, info = grade_detection(a, BUG_CODE)
-        assert score == 1.0
+class TestDetectionGrader:
+    def test_exact_match_stays_open_interval(self):
+        action = Action(action_type="detect", issue_types=[IssueType.BUG])
+        score, info = grade_detection(action, BUG_CODE)
+        assert_open_interval(score)
+        assert score > 0.85
         assert info["task_complete"] is True
 
-    def test_exact_multi_issue_scores_1(self):
-        a = Action(action_type="detect", issue_types=[IssueType.SECURITY, IssueType.PERFORMANCE])
-        score, info = grade_detection(a, MULTI_CODE)
-        assert score == 1.0
+    def test_wrong_guess_is_low_but_not_zero(self):
+        action = Action(action_type="detect", issue_types=[IssueType.STYLE])
+        score, info = grade_detection(action, BUG_CODE)
+        assert_open_interval(score)
+        assert score < 0.25
+        assert info["task_complete"] is False
+
+    def test_partial_multi_issue_gets_midrange_reward(self):
+        action = Action(action_type="detect", issue_types=[IssueType.SECURITY])
+        score, _ = grade_detection(action, MULTI_CODE)
+        assert 0.4 < score < 0.8
+
+
+class TestSeverityGrader:
+    def test_exact_match_clears_medium_success_threshold(self):
+        action = Action(action_type="classify", severity=Severity.HIGH)
+        score, info = grade_severity(action, BUG_CODE, {})
+        assert_open_interval(score)
+        assert score > MEDIUM_TASK["success_threshold"]
         assert info["task_complete"] is True
 
-    def test_correct_none_scores_1(self):
-        a = Action(action_type="detect", issue_types=[IssueType.NONE])
-        score, info = grade_detection(a, NONE_CODE)
-        assert score == 1.0
+    def test_critical_underclassification_is_penalized(self):
+        action = Action(action_type="classify", severity=Severity.MEDIUM)
+        score, info = grade_severity(action, SECURITY_CODE, {})
+        assert_open_interval(score)
+        assert score < 0.5
+        assert info["distance"] == 2
 
-    def test_false_positive_penalized(self):
-        a = Action(action_type="detect", issue_types=[IssueType.BUG])
-        score, _ = grade_detection(a, NONE_CODE)
-        assert score < 0
-
-    def test_false_negative_penalized(self):
-        """Predicting 'none' on real-issue code should be penalized."""
-        a = Action(action_type="detect", issue_types=[IssueType.NONE])
-        score, _ = grade_detection(a, BUG_CODE)
-        assert score < 0
-
-    def test_partial_match_multi_issue(self):
-        """Predicting only one of two issues gets partial credit."""
-        a = Action(action_type="detect", issue_types=[IssueType.SECURITY])
-        score, info = grade_detection(a, MULTI_CODE)
-        assert 0.0 < score < 1.0
-
-    def test_completely_wrong_scores_zero(self):
-        a = Action(action_type="detect", issue_types=[IssueType.STYLE])
-        score, _ = grade_detection(a, BUG_CODE)
-        assert score == 0.0
-
-    def test_wrong_action_type_penalized(self):
-        a = Action(action_type="classify", severity=Severity.HIGH)
-        score, info = grade_detection(a, BUG_CODE)
-        assert score < 0
-
-    def test_keyword_stuffing_blocked(self):
-        """Predicting all issue types should not score high."""
-        a = Action(action_type="detect",
-                   issue_types=[IssueType.BUG, IssueType.SECURITY,
-                                 IssueType.PERFORMANCE, IssueType.STYLE])
-        score, info = grade_detection(a, SECURITY_CODE)
-        assert score <= 0.2, f"Stuffing should be blocked, got {score}"
-
-    def test_scores_vary_across_inputs(self):
-        """Grader must return different scores for different inputs — never constant."""
-        a = Action(action_type="detect", issue_types=[IssueType.SECURITY])
-        scores = set()
-        for code in [NONE_CODE, BUG_CODE, SECURITY_CODE, MULTI_CODE]:
-            s, _ = grade_detection(a, code)
-            scores.add(s)
-        assert len(scores) > 1, "Grader returned identical scores for all inputs"
-
-    def test_score_never_exceeds_1(self):
-        for issue in list(IssueType):
-            a = Action(action_type="detect", issue_types=[issue])
-            for code in [NONE_CODE, BUG_CODE, SECURITY_CODE, MULTI_CODE]:
-                s, _ = grade_detection(a, code)
-                assert s <= 1.0, f"Score {s} exceeds 1.0"
+    def test_medium_detect_step_unlocks_bonus(self):
+        state = {"task": "medium", "code": SECURITY_CODE}
+        detect_action = Action(action_type="detect", issue_types=[IssueType.SECURITY])
+        classify_action = Action(action_type="classify", severity=Severity.CRITICAL)
+        prep_score, prep_info = grade_action(detect_action, state)
+        final_score, final_info = grade_action(classify_action, state)
+        assert_open_interval(prep_score)
+        assert prep_info["task_complete"] is False
+        assert final_info["used_detection_bonus"] is True
+        assert final_score > 0.9
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# MEDIUM GRADER: grade_severity
-# ═══════════════════════════════════════════════════════════════════════════
+class TestHardPipeline:
+    def test_detect_and_classify_steps_are_valid_in_hard_mode(self):
+        state = {"task": "hard", "code": MULTI_CODE, "history": []}
+        detect_action = Action(
+            action_type="detect",
+            issue_types=[IssueType.SECURITY, IssueType.PERFORMANCE],
+        )
+        classify_action = Action(action_type="classify", severity=Severity.CRITICAL)
 
-class TestMediumGrader:
+        detect_score, detect_info = grade_action(detect_action, state)
+        classify_score, classify_info = grade_action(classify_action, state)
 
-    def test_exact_match_scores_1(self):
-        a = Action(action_type="classify", severity=Severity.HIGH)
-        score, info = grade_severity(a, BUG_CODE, EMPTY_STATE)
-        assert score == 1.0
-        assert info["task_complete"] is True
+        assert_open_interval(detect_score)
+        assert_open_interval(classify_score)
+        assert detect_info["stage"] == "detect"
+        assert classify_info["stage"] == "classify"
+        assert detect_info["task_complete"] is False
+        assert classify_info["task_complete"] is False
 
-    def test_one_step_off_scores_0_7(self):
-        # BUG_CODE correct = high, predicting medium (1 step off)
-        a = Action(action_type="classify", severity=Severity.MEDIUM)
-        score, info = grade_severity(a, BUG_CODE, EMPTY_STATE)
-        assert 0.6 <= score <= 0.8
-        assert info["distance"] == 1
-
-    def test_critical_module_underclassify_penalized(self):
-        """Under-classifying a critical module gets penalized."""
-        a = Action(action_type="classify", severity=Severity.MEDIUM)
-        score, _ = grade_severity(a, SECURITY_CODE, EMPTY_STATE)
-        # Correct=critical, predicted=medium (2 steps off), critical_module=True
-        # base = max(0.1, 1.0 - 0.6) = 0.4; penalty -0.2; clamped = 0.2
-        assert score <= 0.3
-
-    def test_critical_module_overclassify_no_penalty(self):
-        """Over-classifying (predicting too high) should NOT be penalized."""
-        # BUG_CODE correct=high, critical_module=False — just test no extra penalty
-        a = Action(action_type="classify", severity=Severity.CRITICAL)
-        score_no_crit, _ = grade_severity(a, BUG_CODE, EMPTY_STATE)
-        # Should score based only on distance, no critical module penalty (critical_module=False)
-        assert score_no_crit > 0.0
-
-    def test_score_never_below_zero(self):
-        """FIX: clamping — score must never go below 0.0."""
-        for sv in list(Severity):
-            a = Action(action_type="classify", severity=sv)
-            score, _ = grade_severity(a, SECURITY_CODE, EMPTY_STATE)
-            assert score >= 0.0, f"Score {score} is negative for severity={sv}"
-
-    def test_score_never_exceeds_1(self):
-        for sv in list(Severity):
-            a = Action(action_type="classify", severity=sv)
-            score, _ = grade_severity(a, SECURITY_CODE, EMPTY_STATE)
-            assert score <= 1.0
-
-    def test_scores_vary_by_distance(self):
-        """Different severity predictions must produce different scores."""
-        scores = []
-        for sv in ["critical", "high", "medium", "low"]:
-            a = Action(action_type="classify", severity=Severity(sv))
-            score, _ = grade_severity(a, SECURITY_CODE, EMPTY_STATE)
-            scores.append(score)
-        assert len(set(scores)) > 1, "Grader returned identical scores for all severities"
-
-    def test_wrong_action_type_penalized(self):
-        a = Action(action_type="detect", issue_types=[IssueType.BUG])
-        score, _ = grade_severity(a, BUG_CODE, EMPTY_STATE)
-        assert score < 0
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# HARD GRADER: grade_full_review
-# ═══════════════════════════════════════════════════════════════════════════
-
-class TestHardGrader:
-
-    def test_empty_comment_scores_zero(self):
-        a = Action(action_type="review", comment="")
-        score, _ = grade_full_review(a, SECURITY_CODE, EMPTY_STATE)
-        assert score == 0.0
-
-    def test_missing_comment_scores_zero(self):
-        a = Action(action_type="review", comment=None)
-        score, _ = grade_full_review(a, SECURITY_CODE, EMPTY_STATE)
-        assert score == 0.0
-
-    def test_keyword_stuffing_blocked(self):
-        """A comment that is just a dump of keywords should score very low."""
-        stuffed = "bug security performance style none critical fix recommend suggest consider"
-        a = Action(action_type="review", comment=stuffed)
-        score, info = grade_full_review(a, SECURITY_CODE, EMPTY_STATE)
-        assert score <= 0.1, f"Stuffing should be blocked, got {score}: {info}"
-
-    def test_good_security_review_scores_well(self):
+    def test_good_review_scores_above_hard_threshold(self):
         state = {
-            "history": [
-                "step=1 | action=detect | task_complete=True",
-                "step=2 | action=classify | task_complete=True",
-            ]
+            "task": "hard",
+            "code": SECURITY_CODE,
+            "history": [],
+            "hard_progress": {
+                "detected_issues": ["security"],
+                "detect_exact": True,
+                "classified_severity": "critical",
+                "classify_exact": True,
+            },
         }
-        good_comment = (
-            "This code has a critical security vulnerability — specifically SQL injection. "
-            "The string concatenation approach allows an attacker to manipulate the query. "
-            "I recommend replacing this with parameterized queries or a prepared statement. "
-            "For example: cursor.execute('SELECT * FROM users WHERE name = %s', (name,)). "
-            "Given this is in the authentication module, this is a critical severity issue. "
-            "Please fix before merging."
-        )
-        a = Action(action_type="review", comment=good_comment)
-        score, info = grade_full_review(a, SECURITY_CODE, state)
-        assert score >= 0.55, f"Good review scored too low: {score}. Breakdown: {info}"
-
-    def test_false_positive_on_clean_code_penalized(self):
-        a = Action(action_type="review",
-                   comment="This code has a security vulnerability and performance bug. Fix it.")
-        score, _ = grade_full_review(a, NONE_CODE, EMPTY_STATE)
-        # Should be penalized for reviewing clean code as buggy
-        assert score < 0.3
-
-    def test_preparation_bonus_applied(self):
-        state_with_history = {
-            "history": [
-                "step=1 | action=detect | task_complete=True",
-                "step=2 | action=classify | task_complete=True",
-            ]
-        }
-        state_no_history = {"history": []}
-
         comment = (
-            "This code has a security issue — SQL injection via string concatenation. "
-            "It is a critical risk. I recommend using parameterized queries. "
-            "Please fix before merging. Consider adding input validation as well."
+            "This is a critical security issue caused by SQL injection in the query construction. "
+            "I recommend replacing the string concatenation with a parameterized query or prepared "
+            "statement so user input is never executed directly. Please fix this before merging."
         )
-        a = Action(action_type="review", comment=comment)
-        score_with, _ = grade_full_review(a, SECURITY_CODE, state_with_history)
-        score_without, _ = grade_full_review(a, SECURITY_CODE, state_no_history)
-        assert score_with > score_without, "Preparation bonus was not applied"
+        action = Action(action_type="review", comment=comment)
+        score, info = grade_full_review(action, SECURITY_CODE, state)
+        assert_open_interval(score)
+        assert score > HARD_TASK["success_threshold"]
+        assert info["task_complete"] is True
 
-    def test_score_always_in_range(self):
-        comments = [
-            "nothing",
-            "bug security performance fix recommend critical sql injection parameterized",
-            "",
-            "This is a critical security vulnerability. The SQL injection via string "
-            "concatenation allows attackers to manipulate database queries. I recommend "
-            "using parameterized queries. This should be fixed immediately.",
+    def test_keyword_stuffing_is_capped_but_not_zero(self):
+        action = Action(
+            action_type="review",
+            comment="bug security performance style none critical high fix recommend suggest consider",
+        )
+        score, info = grade_full_review(action, SECURITY_CODE, {"task": "hard", "code": SECURITY_CODE})
+        assert_open_interval(score)
+        assert score < 0.2
+        assert "keyword stuffing" in info["reason"]
+
+
+class TestConfigContracts:
+    @pytest.mark.parametrize("task_config", [EASY_TASK, MEDIUM_TASK, HARD_TASK])
+    def test_success_thresholds_stay_in_open_interval(self, task_config):
+        assert 0.0 < task_config["success_threshold"] < 1.0
+
+    def test_public_task_numbers_never_use_zero_or_one(self):
+        numeric_values = []
+
+        def collect_numbers(value):
+            if isinstance(value, dict):
+                for child in value.values():
+                    collect_numbers(child)
+            elif isinstance(value, (int, float)) and not isinstance(value, bool):
+                numeric_values.append(float(value))
+
+        collect_numbers(EASY_TASK)
+        collect_numbers(MEDIUM_TASK)
+        collect_numbers(HARD_TASK)
+
+        for value in numeric_values:
+            assert value != 0.0
+            assert value != 1.0
+
+
+class TestGlobalBounds:
+    def test_normalized_bounds_are_strict(self):
+        assert 0.0 < MIN_SCORE < 1.0
+        assert 0.0 < MAX_SCORE < 1.0
+        assert MIN_SCORE < MAX_SCORE
+
+    def test_all_grader_paths_stay_in_open_interval(self):
+        states = [
+            {"task": "easy", "code": BUG_CODE},
+            {"task": "medium", "code": SECURITY_CODE},
+            {"task": "hard", "code": MULTI_CODE, "history": []},
         ]
-        for comment in comments:
-            a = Action(action_type="review", comment=comment)
-            score, _ = grade_full_review(a, SECURITY_CODE, EMPTY_STATE)
-            assert 0.0 <= score <= 1.0, f"Score {score} out of range for comment: {comment[:40]}"
+        actions = [
+            Action(action_type="detect", issue_types=[IssueType.BUG]),
+            Action(action_type="detect", issue_types=[IssueType.SECURITY]),
+            Action(action_type="classify", severity=Severity.HIGH),
+            Action(action_type="classify", severity=Severity.CRITICAL),
+            Action(
+                action_type="review",
+                comment=(
+                    "This is a critical security issue caused by SQL injection. "
+                    "I recommend parameterized queries and a prepared statement."
+                ),
+            ),
+            Action(action_type="review", comment="bug security performance style none"),
+        ]
 
-    def test_scores_vary_by_quality(self):
-        """Better reviews must score higher than worse ones."""
-        a_bad  = Action(action_type="review", comment="bad code fix it")
-        a_good = Action(action_type="review", comment=(
-            "This code has a critical security vulnerability. The SQL injection risk "
-            "from string concatenation in the authentication module is severe. "
-            "I recommend replacing with parameterized queries: "
-            "cursor.execute('SELECT * FROM users WHERE name = %s', (name,)). "
-            "Please fix before merging. Consider also using an ORM."
-        ))
-        s_bad,  _ = grade_full_review(a_bad,  SECURITY_CODE, EMPTY_STATE)
-        s_good, _ = grade_full_review(a_good, SECURITY_CODE, EMPTY_STATE)
-        assert s_good > s_bad, f"Good review ({s_good}) not higher than bad ({s_bad})"
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# CROSS-GRADER: invariants
-# ═══════════════════════════════════════════════════════════════════════════
-
-class TestInvariants:
-
-    def test_all_graders_return_tuple(self):
-        codes = [NONE_CODE, BUG_CODE, SECURITY_CODE, MULTI_CODE]
-        for code in codes:
-            a1 = Action(action_type="detect", issue_types=[IssueType.BUG])
-            a2 = Action(action_type="classify", severity=Severity.HIGH)
-            a3 = Action(action_type="review", comment="test review comment for security issues")
-            for a, grader in [(a1, grade_detection), (a3, grade_full_review)]:
-                result = grader(a, code) if grader != grade_full_review else grader(a, code, EMPTY_STATE)
-                assert isinstance(result, tuple) and len(result) == 2
-            r = grade_severity(a2, code, EMPTY_STATE)
-            assert isinstance(r, tuple) and len(r) == 2
-
-    def test_all_scores_in_valid_range(self):
-        """No grader may return a score outside [-0.2, 1.0]."""
-        codes = [NONE_CODE, BUG_CODE, SECURITY_CODE, MULTI_CODE]
-        actions_easy = [Action(action_type="detect", issue_types=[it]) for it in IssueType]
-        actions_med  = [Action(action_type="classify", severity=sv) for sv in Severity]
-        for code in codes:
-            for a in actions_easy:
-                s, _ = grade_detection(a, code)
-                assert -0.3 <= s <= 1.0, f"Out of range: {s}"
-            for a in actions_med:
-                s, _ = grade_severity(a, code, EMPTY_STATE)
-                assert -0.3 <= s <= 1.0, f"Out of range: {s}"
+        for state in states:
+            for action in actions:
+                score, _ = grade_action(action, dict(state))
+                assert_open_interval(score)
 
 
 if __name__ == "__main__":

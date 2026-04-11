@@ -13,11 +13,12 @@ TASK_CONFIG = {
     "success_threshold":  0.7,
     "required_action":    "detect",
     "scoring": {
-        "exact_match":       0.99,
-        "partial_jaccard":   "0.35 + jaccard * 0.60",
-        "false_positive":    0.05,
-        "false_negative":    0.10,
-        "keyword_stuffing":  0.08,
-        "wrong_action":      0.12,
+        "exact_match":       0.92,
+        "partial_credit":    "0.28 + 0.34*jaccard + 0.18*precision + 0.12*recall",
+        "false_positive":    0.14,
+        "false_negative":    0.12,
+        "no_match":          0.16,
+        "wrong_action":      0.18,
+        "contract":          "all task scores remain strictly within (0, 1)",
     },
 }
